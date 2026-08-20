@@ -1,26 +1,29 @@
 "use client";
-import {useMemo,useState} from "react";
+import {useCallback,useEffect,useMemo,useState} from "react";
 import raw from "./interventions-data.json";
 
 type Row={id:string;apartment:string;date:string;category:string;description:string;author:string};
-const data=raw as Row[];
+const fallbackData=raw as Row[];
 const monthKey=(d:string)=>d.slice(0,7);
 const monthFmt=new Intl.DateTimeFormat("fr-FR",{month:"long",year:"numeric",timeZone:"Europe/Paris"});
 const dayFmt=new Intl.DateTimeFormat("fr-FR",{day:"2-digit",month:"short",year:"numeric",timeZone:"Europe/Paris"});
-const months=[...new Set(data.map(r=>monthKey(r.date)))].sort().reverse();
-const categories=[...new Set(data.map(r=>r.category))].sort();
 const labelMonth=(m:string)=>monthFmt.format(new Date(`${m}-15T12:00:00Z`));
 const COLORS:Record<string,string>={"Nuisibles & hygiène":"red","Textile & rideaux":"green","Électroménager & TV":"violet","Plomberie":"blue","Électricité & clim":"amber","Menuiserie & accès":"cyan","Mobilier & literie":"rose","Équipement bébé":"mint","Autre technique":"slate"};
 
 export default function Page(){
- const [period,setPeriod]=useState("all"); const [query,setQuery]=useState(""); const [category,setCategory]=useState("all"); const [selected,setSelected]=useState<string|null>(null);
+ const [data,setData]=useState<Row[]>(fallbackData); const [period,setPeriod]=useState("all"); const [query,setQuery]=useState(""); const [category,setCategory]=useState("all"); const [selected,setSelected]=useState<string|null>(null); const [syncing,setSyncing]=useState(false); const [live,setLive]=useState(false); const [syncedAt,setSyncedAt]=useState<string|null>(null); const [syncError,setSyncError]=useState("");
+ const months=useMemo(()=>[...new Set(data.map(r=>monthKey(r.date)))].sort().reverse(),[data]);
+ const categories=useMemo(()=>[...new Set(data.map(r=>r.category))].sort(),[data]);
+ const sync=useCallback(async()=>{setSyncing(true);setSyncError("");try{const response=await fetch("/api/pumble",{cache:"no-store"});const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||"Erreur Pumble");if(Array.isArray(result.rows)&&result.rows.length){setData(result.rows);setLive(true);setSyncedAt(result.syncedAt);setPeriod("all")}else throw new Error("Aucune intervention reçue")}catch(error){setSyncError(error instanceof Error?error.message:"Erreur Pumble")}finally{setSyncing(false)}},[]);
+ useEffect(()=>{sync()},[sync]);
  const rows=useMemo(()=>period==="all"?data:data.filter(r=>monthKey(r.date)===period),[period]);
  const apartments=useMemo(()=>{const map=new Map<string,Row[]>(); rows.forEach(r=>map.set(r.apartment,[...(map.get(r.apartment)||[]),r])); return [...map].map(([number,items])=>({number,items,total:items.length,categories:[...new Set(items.map(i=>i.category))],latest:items[0]})).filter(a=>(!query||a.number.includes(query))&&(category==="all"||a.categories.includes(category))).sort((a,b)=>b.total-a.total||a.number.localeCompare(b.number))},[rows,query,category]);
  const counts=useMemo(()=>categories.map(name=>({name,count:rows.filter(r=>r.category===name).length})).sort((a,b)=>b.count-a.count),[rows]);
- const trend=useMemo(()=>[...months].reverse().map(m=>({month:m,count:data.filter(r=>monthKey(r.date)===m).length,apartments:new Set(data.filter(r=>monthKey(r.date)===m).map(r=>r.apartment)).size})),[]);
+ const trend=useMemo(()=>[...months].reverse().map(m=>({month:m,count:data.filter(r=>monthKey(r.date)===m).length,apartments:new Set(data.filter(r=>monthKey(r.date)===m).map(r=>r.apartment)).size})),[data,months]);
  const maxTrend=Math.max(...trend.map(t=>t.count),1); const top=apartments[0]; const recurring=apartments.filter(a=>a.total>=4).length; const periodLabel=period==="all"?"Saison entière":labelMonth(period); const selectedRows=selected?rows.filter(r=>r.apartment===selected):[];
  return <main>
-  <header className="top no-print"><div className="brand"><b>MG</b><span><strong>Mer & Golf</strong><small>Port Argelès · Service technique</small></span></div><div className="status"><i/> Données arrêtées au {dayFmt.format(new Date(data[0].date))}</div><button onClick={()=>window.print()}>Imprimer le bilan</button></header>
+  <header className="top no-print"><div className="brand"><b>MG</b><span><strong>Mer & Golf</strong><small>Port Argelès · Service technique</small></span></div><div className={`status ${live?"is-live":""}`}><i/> {live?`Pumble synchronisé${syncedAt?` à ${new Intl.DateTimeFormat("fr-FR",{hour:"2-digit",minute:"2-digit",timeZone:"Europe/Paris"}).format(new Date(syncedAt))}`:""}`:`Archive locale · ${dayFmt.format(new Date(data[0].date))}`}</div><button className="sync-button" disabled={syncing} onClick={sync}>{syncing?"Synchronisation…":"Actualiser Pumble"}</button><button onClick={()=>window.print()}>Imprimer le bilan</button></header>
+  {syncError&&<div className="sync-warning no-print">{syncError} · Les données archivées restent affichées.</div>}
   <section className="hero"><div><p>TABLEAU DE BORD MAINTENANCE</p><h1>Vue d’ensemble des interventions</h1><span>260 appartements · Historique Pumble normalisé · Mars à août 2026</span></div><label className="period no-print"><span>Période analysée</span><select aria-label="Période" value={period} onChange={e=>setPeriod(e.target.value)}><option value="all">Saison entière · toutes périodes</option>{months.map(m=><option key={m} value={m}>{labelMonth(m)}</option>)}</select></label></section>
   <section className="season-strip"><div><small>PÉRIODE</small><strong>{periodLabel}</strong></div><p>{period==="all"?`${months.length} mois consolidés`:`Bilan mensuel`} · {rows.length} interventions analysées</p></section>
   <section className="kpis">
