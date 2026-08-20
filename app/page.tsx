@@ -18,7 +18,8 @@ const CATEGORY_RULES:[string,RegExp][]=[
 ];
 const FOLLOW_UP_ONLY=/vous me confirm|tu me confirm|on peut rien faire|vous pouvez y aller|donc il est parti|\bmerci\b|remerci/i;
 const TECHNICAL_DETAIL=/vibration|alarme|incendie|néon|neon|freezer|marbre|fissur|accoudoir|d[ée]bo[iî]t|dysjonct|disjonct|sonne|retirer|récupérer|recuperer|ventilo|barre|planche|travaux?|intervention/i;
-const isCountableText=(text:string)=>!FOLLOW_UP_ONLY.test(text)||CATEGORY_RULES.some(([,rule])=>rule.test(text))||TECHNICAL_DETAIL.test(text);
+function isHousekeepingStatus(text:string){const value=text.replace(/\b\d{1,3}\b/g," ").replace(/[\/,;&+.:–—-]/g," ").replace(/\b(?:et|l|appartement|appart|appt)\b/gi," ").replace(/\s+/g," ").trim();return /^(?:propre|nickel|ok|ras|fait|réglé|regle|résolu|resolu|libre|bon|tout bon)$/i.test(value)}
+const isCountableText=(text:string)=>!isHousekeepingStatus(text)&&(!FOLLOW_UP_ONLY.test(text)||CATEGORY_RULES.some(([,rule])=>rule.test(text))||TECHNICAL_DETAIL.test(text));
 const normalizeApartmentNumber=(value:string)=>{const number=Number.parseInt(value,10);return Number.isInteger(number)&&number>=1&&number<=999?String(number).padStart(3,"0"):value};
 const normalizeCategory=(text:string,current:string)=>CATEGORY_RULES.find(([,rule])=>rule.test(text))?.[0]||current||"Autre technique";
 function cleanDescription(text:string,apartment:string,category:string){
@@ -40,7 +41,9 @@ function cleanDescription(text:string,apartment:string,category:string){
  return value.charAt(0).toUpperCase()+value.slice(1);
 }
 function normalizeRow(row:Row):Row{const apartment=normalizeApartmentNumber(row.apartment);const category=normalizeCategory(row.description,row.category);return {...row,apartment,category,description:cleanDescription(row.description,apartment,category)}}
-const fallbackData=(raw as Row[]).filter(row=>isCountableText(row.description)).map(normalizeRow);
+const isPreciseRow=(row:Row)=>!row.description.endsWith("· intervention à préciser");
+function deduplicateRows(rows:Row[]){const unique=new Map<string,Row>();for(const row of rows){const sourceId=row.id.replace(/-\d{1,3}$/,"");const key=`${sourceId}|${row.apartment}`;const existing=unique.get(key);unique.set(key,existing?{...existing,...row,status:row.status||existing.status,attachments:row.attachments?.length?row.attachments:existing.attachments}:row)}return [...unique.values()].sort((a,b)=>new Date(b.date).getTime()-new Date(a.date).getTime())}
+const fallbackData=deduplicateRows((raw as Row[]).filter(row=>isCountableText(row.description)).map(normalizeRow).filter(isPreciseRow));
 const TOTAL_APARTMENTS=260;
 const monthFmt=new Intl.DateTimeFormat("fr-FR",{month:"long",year:"numeric",timeZone:"Europe/Paris"});
 const shortMonthFmt=new Intl.DateTimeFormat("fr-FR",{month:"short",timeZone:"Europe/Paris"});
@@ -63,7 +66,7 @@ function StatusBadge({status="Archivée"}:{status?:string}){return <span classNa
 
 export default function Page(){
  const [data,setData]=useState<Row[]>(fallbackData); const [view,setView]=useState<View>("dashboard"); const [period,setPeriod]=useState("all"); const [query,setQuery]=useState(""); const [category,setCategory]=useState("all"); const [status,setStatus]=useState("all"); const [selected,setSelected]=useState<string|null>(null); const [syncing,setSyncing]=useState(false); const [live,setLive]=useState(false); const [syncedAt,setSyncedAt]=useState<string|null>(null); const [syncError,setSyncError]=useState("");
- const sync=useCallback(async()=>{setSyncing(true);setSyncError("");try{const response=await fetch("/api/pumble",{cache:"no-store"});const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||"Erreur Pumble");if(!Array.isArray(result.rows)||!result.rows.length)throw new Error("Aucune intervention trouvée dans ce canal");setData(current=>{const merged=new Map(current.map(row=>[row.id,row]));result.rows.filter((row:Row)=>isCountableText(row.description)).forEach((row:Row)=>{const normalized=normalizeRow(row);merged.set(normalized.id,normalized)});return [...merged.values()].sort((a,b)=>new Date(b.date).getTime()-new Date(a.date).getTime())});setLive(true);setSyncedAt(result.syncedAt)}catch(error){setSyncError(error instanceof Error?error.message:"Erreur Pumble")}finally{setSyncing(false)}},[]);
+ const sync=useCallback(async()=>{setSyncing(true);setSyncError("");try{const response=await fetch("/api/pumble",{cache:"no-store"});const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||"Erreur Pumble");if(!Array.isArray(result.rows)||!result.rows.length)throw new Error("Aucune intervention trouvée dans ce canal");setData(current=>{const incoming=result.rows.filter((row:Row)=>isCountableText(row.description)).map(normalizeRow).filter(isPreciseRow);return deduplicateRows([...current,...incoming])});setLive(true);setSyncedAt(result.syncedAt)}catch(error){setSyncError(error instanceof Error?error.message:"Erreur Pumble")}finally{setSyncing(false)}},[]);
  useEffect(()=>{sync()},[sync]);
  const months=useMemo(()=>[...new Set(data.map(row=>monthKey(row.date)))].sort().reverse(),[data]);
  const categories=useMemo(()=>[...new Set(data.map(row=>row.category))].sort(),[data]);

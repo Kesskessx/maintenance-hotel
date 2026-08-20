@@ -33,6 +33,8 @@ const category=(text:string)=>rules.find(([,rule])=>rule.test(text))?.[0]||"Autr
 const followUpOnly=/vous me confirm|tu me confirm|on peut rien faire|vous pouvez y aller|donc il est parti|\bmerci\b|remerci/i;
 const technicalDetail=/vibration|alarme|incendie|néon|neon|freezer|marbre|fissur|accoudoir|d[ée]bo[iî]t|dysjonct|disjonct|sonne|retirer|récupérer|recuperer|ventilo|barre|planche|travaux?|intervention/i;
 const hasTechnicalDetail=(text:string)=>rules.some(([,rule])=>rule.test(text))||technicalDetail.test(text);
+const hasDescription=(text:string)=>hasTechnicalDetail(text)||/[A-Za-zÀ-ÿ]{4,}/.test(text.replace(/\b\d{1,3}\b/g," "));
+function isHousekeepingStatus(text:string){const value=text.replace(/\b\d{1,3}\b/g," ").replace(/[\/,;&+.:–—-]/g," ").replace(/\b(?:et|l|appartement|appart|appt)\b/gi," ").replace(/\s+/g," ").trim();return /^(?:propre|nickel|ok|ras|fait|réglé|regle|résolu|resolu|libre|bon|tout bon)$/i.test(value)}
 const normalizeApartment=(value:string)=>{const number=Number.parseInt(value,10);return Number.isInteger(number)&&number>=1&&number<=999?String(number).padStart(3,"0"):null};
 function apartment(text:string){
  const explicit=text.match(/(?:app(?:art(?:ement)?)?|appt|logement)\s*(?:n[°ºo]\s*)?[:\s-]*(\d{1,3})\b/i)?.[1];
@@ -41,7 +43,7 @@ function apartment(text:string){
  const trailing=hasTechnicalDetail(text)?text.match(/\b(\d{1,3})\s*[?.!]*$/)?.[1]:undefined;
  return normalizeApartment(explicit||leading||threeDigits||trailing||"");
 }
-const useful=(text:string)=>{const value=text.trim();return value.length>5&&!/^(ok|fait|réglé|regle|résolu|resolu|merci|1|1 réponse|\+1)[.!\s]*$/i.test(value)&&!(followUpOnly.test(value)&&!hasTechnicalDetail(value))};
+const useful=(text:string)=>{const value=text.trim();return value.length>5&&hasDescription(value)&&!isHousekeepingStatus(value)&&!/^(ok|fait|réglé|regle|résolu|resolu|merci|1|1 réponse|\+1)[.!\s]*$/i.test(value)&&!(followUpOnly.test(value)&&!hasTechnicalDetail(value))};
 function status(reactions:unknown[]=[]){
  const value=JSON.stringify(reactions).toLowerCase();
  if(/white_check_mark|heavy_check_mark|✅|☑/.test(value))return "Terminée";
