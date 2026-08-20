@@ -30,8 +30,18 @@ const rules:[string,RegExp][]=[
  ["Équipement bébé",/bébé|bebe|lit parapluie|chaise haute/i],
 ];
 const category=(text:string)=>rules.find(([,rule])=>rule.test(text))?.[0]||"Autre technique";
-const apartment=(text:string)=>text.match(/(?:app(?:art(?:ement)?)?\s*(?:n[°ºo]\s*)?|\b)(\d{3})(?!\d)/i)?.[1]||null;
-const useful=(text:string)=>text.trim().length>5&&!/^(ok|fait|réglé|regle|résolu|resolu|merci|1|1 réponse|\+1)[.!\s]*$/i.test(text.trim());
+const followUpOnly=/vous me confirm|tu me confirm|on peut rien faire|vous pouvez y aller|donc il est parti|\bmerci\b|remerci/i;
+const technicalDetail=/vibration|alarme|incendie|néon|neon|freezer|marbre|fissur|accoudoir|d[ée]bo[iî]t|dysjonct|disjonct|sonne|retirer|récupérer|recuperer|ventilo|barre|planche|travaux?|intervention/i;
+const hasTechnicalDetail=(text:string)=>rules.some(([,rule])=>rule.test(text))||technicalDetail.test(text);
+const normalizeApartment=(value:string)=>{const number=Number.parseInt(value,10);return Number.isInteger(number)&&number>=1&&number<=999?String(number).padStart(3,"0"):null};
+function apartment(text:string){
+ const explicit=text.match(/(?:app(?:art(?:ement)?)?|appt|logement)\s*(?:n[°ºo]\s*)?[:\s-]*(\d{1,3})\b/i)?.[1];
+ const leading=text.match(/^\s*(\d{1,3})(?=\s|[:–—-])/i)?.[1];
+ const threeDigits=text.match(/\b(\d{3})\b/)?.[1];
+ const trailing=hasTechnicalDetail(text)?text.match(/\b(\d{1,3})\s*[?.!]*$/)?.[1]:undefined;
+ return normalizeApartment(explicit||leading||threeDigits||trailing||"");
+}
+const useful=(text:string)=>{const value=text.trim();return value.length>5&&!/^(ok|fait|réglé|regle|résolu|resolu|merci|1|1 réponse|\+1)[.!\s]*$/i.test(value)&&!(followUpOnly.test(value)&&!hasTechnicalDetail(value))};
 function status(reactions:unknown[]=[]){
  const value=JSON.stringify(reactions).toLowerCase();
  if(/white_check_mark|heavy_check_mark|✅|☑/.test(value))return "Terminée";
