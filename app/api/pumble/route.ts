@@ -7,6 +7,18 @@ const API="https://pumble-api-keys.addons.marketplace.cake.com";
 type PumbleChannel={id:string;name?:string;isArchived?:boolean;isMember?:boolean};
 type PumbleMessage={id:string;channelId:string;author?:string;text?:string;timestamp?:string;timestampMilli?:number;deleted?:boolean};
 type PumbleUser={id:string;name?:string};
+function unwrapList<T>(value:unknown,keys:string[]):T[]{
+ if(Array.isArray(value)) return value as T[];
+ if(!value||typeof value!=="object") return [];
+ const record=value as Record<string,unknown>;
+ for(const key of [...keys,"data","items","results","content"]){
+  if(Array.isArray(record[key])) return record[key] as T[];
+  if(record[key]&&typeof record[key]==="object"){
+   const nested=unwrapList<T>(record[key],keys); if(nested.length)return nested;
+  }
+ }
+ return [];
+}
 const rules:[string,RegExp][]=[
  ["Plomberie",/fuite|douche|baignoire|lavabo|evier|évier|wc|toilette|chasse|robinet|eau |évacuation|evacuation|bouch[ée]|égout|egout|pommeau|siphon|joint/i],
  ["Électricité & clim",/clim|climat|chauffage|radiateur|électri|electri|lumière|lumiere|ampoule|prise|interrupteur|ventilateur|disjonct/i],
@@ -32,12 +44,15 @@ export async function GET(){
  const key=process.env.PUMBLE_API_KEY;
  if(!key) return NextResponse.json({ok:false,error:"PUMBLE_API_KEY absente"},{status:503});
  try{
-  const [rawChannels,users]=await Promise.all([call<Array<{channel?:PumbleChannel}&PumbleChannel>>("/listChannels",key,"lecture des canaux"),call<PumbleUser[]>("/listUsers",key,"lecture des utilisateurs")]);
+  const [channelsResponse,usersResponse]=await Promise.all([call<unknown>("/listChannels",key,"lecture des canaux"),call<unknown>("/listUsers",key,"lecture des utilisateurs")]);
+  const rawChannels=unwrapList<{channel?:PumbleChannel}&PumbleChannel>(channelsResponse,["channels"]);
+  const users=unwrapList<PumbleUser>(usersResponse,["users"]);
   const channels=rawChannels.map(item=>item.channel||item).filter(c=>!c.isArchived&&c.isMember!==false);
   const wanted=(process.env.PUMBLE_CHANNEL||"").trim().toLowerCase();
   const channel=channels.find(c=>c.id===wanted||c.name?.toLowerCase()===wanted)||channels.find(c=>/maintenance|intervention|technique/i.test(c.name||""));
   if(!channel) return NextResponse.json({ok:false,error:"Canal Pumble introuvable. Ajouter PUMBLE_CHANNEL dans Vercel."},{status:503});
-  const messages=await call<PumbleMessage[]>(`/listMessages?channelId=${encodeURIComponent(channel.id)}`,key,"lecture des messages");
+  const messagesResponse=await call<unknown>(`/listMessages?channelId=${encodeURIComponent(channel.id)}`,key,"lecture des messages");
+  const messages=unwrapList<PumbleMessage>(messagesResponse,["messages"]);
   const names=new Map(users.map(user=>[user.id,user.name||"Équipe"]));
   const rows=messages.filter(m=>!m.deleted&&useful(m.text||"")).map(m=>{
    const description=(m.text||"").trim(); const apt=apartment(description); if(!apt)return null;
