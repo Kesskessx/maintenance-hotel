@@ -10,8 +10,8 @@ async function signature(secret:string){
 export async function proxy(request:NextRequest){
  const {pathname}=request.nextUrl;
  if(pathname==="/login"||pathname==="/api/auth/login") return NextResponse.next();
- const secret=process.env.SESSION_SECRET;
- if(!secret) return new NextResponse("Configuration de sécurité incomplète",{status:503});
+ const secret=process.env.SESSION_SECRET||process.env.DASHBOARD_PASSWORD;
+ if(!secret) return new NextResponse("DASHBOARD_PASSWORD absente du déploiement Production",{status:503});
  const expected=await signature(secret);
  const session=request.cookies.get("hotel_session")?.value;
  if(session===expected) return NextResponse.next();
