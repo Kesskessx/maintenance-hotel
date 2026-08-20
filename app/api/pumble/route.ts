@@ -21,9 +21,10 @@ const category=(text:string)=>rules.find(([,rule])=>rule.test(text))?.[0]||"Autr
 const apartment=(text:string)=>text.match(/(?:app(?:art(?:ement)?)?\s*(?:n[°ºo]\s*)?|\b)(\d{3})(?!\d)/i)?.[1]||null;
 const useful=(text:string)=>text.trim().length>5&&!/^(ok|fait|réglé|regle|résolu|resolu|merci|1|1 réponse|\+1)[.!\s]*$/i.test(text.trim());
 
-async function call<T>(path:string,key:string):Promise<T>{
+class PumbleError extends Error{constructor(public step:string,public status:number){super(`${step} (${status})`)}}
+async function call<T>(path:string,key:string,step:string):Promise<T>{
  const response=await fetch(`${API}${path}`,{headers:{ApiKey:key},cache:"no-store"});
- if(!response.ok) throw new Error(`Pumble ${response.status}`);
+ if(!response.ok) throw new PumbleError(step,response.status);
  return response.json() as Promise<T>;
 }
 
@@ -31,12 +32,12 @@ export async function GET(){
  const key=process.env.PUMBLE_API_KEY;
  if(!key) return NextResponse.json({ok:false,error:"PUMBLE_API_KEY absente"},{status:503});
  try{
-  const [rawChannels,users]=await Promise.all([call<Array<{channel?:PumbleChannel}&PumbleChannel>>("/listChannels",key),call<PumbleUser[]>("/listUsers",key)]);
+  const [rawChannels,users]=await Promise.all([call<Array<{channel?:PumbleChannel}&PumbleChannel>>("/listChannels",key,"lecture des canaux"),call<PumbleUser[]>("/listUsers",key,"lecture des utilisateurs")]);
   const channels=rawChannels.map(item=>item.channel||item).filter(c=>!c.isArchived&&c.isMember!==false);
   const wanted=(process.env.PUMBLE_CHANNEL||"").trim().toLowerCase();
   const channel=channels.find(c=>c.id===wanted||c.name?.toLowerCase()===wanted)||channels.find(c=>/maintenance|intervention|technique/i.test(c.name||""));
   if(!channel) return NextResponse.json({ok:false,error:"Canal Pumble introuvable. Ajouter PUMBLE_CHANNEL dans Vercel."},{status:503});
-  const messages=await call<PumbleMessage[]>(`/listMessages?channelId=${encodeURIComponent(channel.id)}&limit=1000`,key);
+  const messages=await call<PumbleMessage[]>(`/listMessages?channelId=${encodeURIComponent(channel.id)}`,key,"lecture des messages");
   const names=new Map(users.map(user=>[user.id,user.name||"Équipe"]));
   const rows=messages.filter(m=>!m.deleted&&useful(m.text||"")).map(m=>{
    const description=(m.text||"").trim(); const apt=apartment(description); if(!apt)return null;
@@ -46,6 +47,7 @@ export async function GET(){
   return NextResponse.json({ok:true,channel:channel.name||channel.id,syncedAt:new Date().toISOString(),rows},{headers:{"Cache-Control":"private, no-store"}});
  }catch(error){
   console.error("Pumble sync failed",error instanceof Error?error.message:"unknown");
-  return NextResponse.json({ok:false,error:"Synchronisation Pumble impossible"},{status:502});
+  if(error instanceof PumbleError) return NextResponse.json({ok:false,error:`Pumble refuse la ${error.step} (HTTP ${error.status})`},{status:502});
+  return NextResponse.json({ok:false,error:"Réponse Pumble incompatible"},{status:502});
  }
 }
