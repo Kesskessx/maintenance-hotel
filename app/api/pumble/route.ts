@@ -5,7 +5,7 @@ export const dynamic="force-dynamic";
 
 const API="https://pumble-api-keys.addons.marketplace.cake.com";
 type PumbleChannel={id:string;name?:string;isArchived?:boolean;isMember?:boolean};
-type PumbleMessage={id:string;channelId:string;author?:string;text?:string;timestamp?:string;timestampMilli?:number;deleted?:boolean};
+type PumbleMessage={id:string;channelId:string;author?:string;text?:string;timestamp?:string;timestampMilli?:number;deleted?:boolean;reactions?:unknown[];files?:unknown[];attachments?:unknown[]};
 type PumbleUser={id:string;name?:string};
 function unwrapList<T>(value:unknown,keys:string[]):T[]{
  if(Array.isArray(value)) return value as T[];
@@ -32,6 +32,22 @@ const rules:[string,RegExp][]=[
 const category=(text:string)=>rules.find(([,rule])=>rule.test(text))?.[0]||"Autre technique";
 const apartment=(text:string)=>text.match(/(?:app(?:art(?:ement)?)?\s*(?:n[°ºo]\s*)?|\b)(\d{3})(?!\d)/i)?.[1]||null;
 const useful=(text:string)=>text.trim().length>5&&!/^(ok|fait|réglé|regle|résolu|resolu|merci|1|1 réponse|\+1)[.!\s]*$/i.test(text.trim());
+function status(reactions:unknown[]=[]){
+ const value=JSON.stringify(reactions).toLowerCase();
+ if(/white_check_mark|heavy_check_mark|✅|☑/.test(value))return "Terminée";
+ if(/hourglass|watch|⏳|⌛/.test(value))return "En attente";
+ if(/construction_worker|worker|hammer_and_wrench|👷|🛠/.test(value))return "En cours";
+ if(/red_circle|rotating_light|exclamation|🔴|🚨/.test(value))return "Urgente";
+ return "Signalée";
+}
+function attachments(message:PumbleMessage){
+ return [...(message.files||[]),...(message.attachments||[])].map((item,index)=>{
+  const file=(item&&typeof item==="object"?item:{}) as Record<string,unknown>;
+  const url=[file.urlPrivateDownload,file.downloadUrl,file.urlPrivate,file.url,file.permalink].find(value=>typeof value==="string") as string|undefined;
+  if(!url)return null;
+  return {id:String(file.id||`${message.id}-${index}`),name:String(file.originalName||file.name||file.title||`Pièce jointe ${index+1}`),url,type:String(file.mimeType||file.mimetype||"")};
+ }).filter((file):file is NonNullable<typeof file>=>Boolean(file));
+}
 
 class PumbleError extends Error{constructor(public step:string,public status:number){super(`${step} (${status})`)}}
 async function call<T>(path:string,key:string,step:string):Promise<T>{
@@ -57,7 +73,7 @@ export async function GET(){
   const rows=messages.filter(m=>!m.deleted&&useful(m.text||"")).map(m=>{
    const description=(m.text||"").trim(); const apt=apartment(description); if(!apt)return null;
    const date=m.timestamp||new Date(m.timestampMilli||0).toISOString();
-   return {id:m.id,apartment:apt,date,category:category(description),description,author:names.get(m.author||"")||"Équipe Pumble"};
+   return {id:m.id,apartment:apt,date,category:category(description),description,author:names.get(m.author||"")||"Équipe Pumble",status:status(m.reactions),attachments:attachments(m)};
   }).filter((row):row is NonNullable<typeof row>=>Boolean(row)).sort((a,b)=>new Date(b.date).getTime()-new Date(a.date).getTime());
   return NextResponse.json({ok:true,channel:channel.name||channel.id,syncedAt:new Date().toISOString(),rows},{headers:{"Cache-Control":"private, no-store"}});
  }catch(error){
