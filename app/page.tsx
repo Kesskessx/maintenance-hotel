@@ -16,10 +16,15 @@ const CATEGORY_RULES:[string,RegExp][]=[
  ["Plomberie",/fuite|douche|baignoire|lavabo|[ée]vier|\bwc\b|toilette|chasse|robinet|eau\s|évacuation|evacuation|bouch[ée]|pommeau|siphon|bonde/i],
  ["Mobilier & literie",/chaise|table|canapé|canape|\blit\b|sommier|matelas|surmatelas|meuble|pied\s|poubelle|tancarville|tank?arville|étagère|etagere|étendoir|etendoir/i],
 ];
+const FOLLOW_UP_ONLY=/vous me confirm|tu me confirm|on peut rien faire|vous pouvez y aller|donc il est parti|\bmerci\b|remerci/i;
+const TECHNICAL_DETAIL=/vibration|alarme|incendie|néon|neon|freezer|marbre|fissur|accoudoir|d[ée]bo[iî]t|dysjonct|disjonct|sonne|retirer|récupérer|recuperer|ventilo|barre|planche|travaux?|intervention/i;
+const isCountableText=(text:string)=>!FOLLOW_UP_ONLY.test(text)||CATEGORY_RULES.some(([,rule])=>rule.test(text))||TECHNICAL_DETAIL.test(text);
+const normalizeApartmentNumber=(value:string)=>{const number=Number.parseInt(value,10);return Number.isInteger(number)&&number>=1&&number<=999?String(number).padStart(3,"0"):value};
 const normalizeCategory=(text:string,current:string)=>CATEGORY_RULES.find(([,rule])=>rule.test(text))?.[0]||current||"Autre technique";
 function cleanDescription(text:string,apartment:string,category:string){
  let value=text.replace(/[\r\n]+/g," ").replace(/\s+/g," ").trim();
- value=value.replace(new RegExp(`\\b${apartment}\\b\\s*[:–—-]?`,"gi")," ")
+ const apartmentPattern=[apartment,String(Number.parseInt(apartment,10))].filter((item,index,list)=>item&&list.indexOf(item)===index).join("|");
+ value=value.replace(new RegExp(`\\b(?:${apartmentPattern})\\b\\s*[:–—-]?`,"gi")," ")
   .replace(/\b(?:stp|svp|s'il vous plaît|si possible)\b/gi," ")
   .replace(/\best[ -]?il possible de\b/gi," ")
   .replace(/\bsdb\b/gi,"salle de bain").replace(/\bhs\b/gi,"hors service")
@@ -34,8 +39,8 @@ function cleanDescription(text:string,apartment:string,category:string){
  if(value===value.toLocaleUpperCase("fr-FR")&&/[A-ZÀ-Ÿ]{4}/.test(value))value=value.toLocaleLowerCase("fr-FR");
  return value.charAt(0).toUpperCase()+value.slice(1);
 }
-function normalizeRow(row:Row):Row{const category=normalizeCategory(row.description,row.category);return {...row,category,description:cleanDescription(row.description,row.apartment,category)}}
-const fallbackData=(raw as Row[]).map(normalizeRow);
+function normalizeRow(row:Row):Row{const apartment=normalizeApartmentNumber(row.apartment);const category=normalizeCategory(row.description,row.category);return {...row,apartment,category,description:cleanDescription(row.description,apartment,category)}}
+const fallbackData=(raw as Row[]).filter(row=>isCountableText(row.description)).map(normalizeRow);
 const TOTAL_APARTMENTS=260;
 const monthFmt=new Intl.DateTimeFormat("fr-FR",{month:"long",year:"numeric",timeZone:"Europe/Paris"});
 const shortMonthFmt=new Intl.DateTimeFormat("fr-FR",{month:"short",timeZone:"Europe/Paris"});
@@ -58,7 +63,7 @@ function StatusBadge({status="Archivée"}:{status?:string}){return <span classNa
 
 export default function Page(){
  const [data,setData]=useState<Row[]>(fallbackData); const [view,setView]=useState<View>("dashboard"); const [period,setPeriod]=useState("all"); const [query,setQuery]=useState(""); const [category,setCategory]=useState("all"); const [status,setStatus]=useState("all"); const [selected,setSelected]=useState<string|null>(null); const [syncing,setSyncing]=useState(false); const [live,setLive]=useState(false); const [syncedAt,setSyncedAt]=useState<string|null>(null); const [syncError,setSyncError]=useState("");
- const sync=useCallback(async()=>{setSyncing(true);setSyncError("");try{const response=await fetch("/api/pumble",{cache:"no-store"});const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||"Erreur Pumble");if(!Array.isArray(result.rows)||!result.rows.length)throw new Error("Aucune intervention trouvée dans ce canal");setData(current=>{const merged=new Map(current.map(row=>[row.id,row]));result.rows.forEach((row:Row)=>{const normalized=normalizeRow(row);merged.set(normalized.id,normalized)});return [...merged.values()].sort((a,b)=>new Date(b.date).getTime()-new Date(a.date).getTime())});setLive(true);setSyncedAt(result.syncedAt)}catch(error){setSyncError(error instanceof Error?error.message:"Erreur Pumble")}finally{setSyncing(false)}},[]);
+ const sync=useCallback(async()=>{setSyncing(true);setSyncError("");try{const response=await fetch("/api/pumble",{cache:"no-store"});const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||"Erreur Pumble");if(!Array.isArray(result.rows)||!result.rows.length)throw new Error("Aucune intervention trouvée dans ce canal");setData(current=>{const merged=new Map(current.map(row=>[row.id,row]));result.rows.filter((row:Row)=>isCountableText(row.description)).forEach((row:Row)=>{const normalized=normalizeRow(row);merged.set(normalized.id,normalized)});return [...merged.values()].sort((a,b)=>new Date(b.date).getTime()-new Date(a.date).getTime())});setLive(true);setSyncedAt(result.syncedAt)}catch(error){setSyncError(error instanceof Error?error.message:"Erreur Pumble")}finally{setSyncing(false)}},[]);
  useEffect(()=>{sync()},[sync]);
  const months=useMemo(()=>[...new Set(data.map(row=>monthKey(row.date)))].sort().reverse(),[data]);
  const categories=useMemo(()=>[...new Set(data.map(row=>row.category))].sort(),[data]);
