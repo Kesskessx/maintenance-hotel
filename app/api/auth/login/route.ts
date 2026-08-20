@@ -9,8 +9,8 @@ async function signature(secret:string){
 
 export async function POST(request:NextRequest){
  const password=process.env.DASHBOARD_PASSWORD;
- const secret=process.env.SESSION_SECRET;
- if(!password||!secret) return NextResponse.json({ok:false,error:"Configuration incomplète"},{status:503});
+ if(!password) return NextResponse.json({ok:false,error:"DASHBOARD_PASSWORD absente du déploiement Production"},{status:503});
+ const secret=process.env.SESSION_SECRET||password;
  const body=await request.json().catch(()=>null) as {password?:string}|null;
  if(body?.password!==password) return NextResponse.json({ok:false,error:"Mot de passe incorrect"},{status:401});
  const response=NextResponse.json({ok:true});
